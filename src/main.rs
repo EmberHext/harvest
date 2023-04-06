@@ -1,6 +1,7 @@
 /*
- * HARVEST (High-speed Asynchronous Rust Vocabulary Extraction and Search Tool) is a tool to crawl through a
- * supplied web page, and 
+ * HARVEST (High-speed Asynchronous Rust Vocabulary Extraction and Search Tool) is an OSINT tool to recursively 
+ * crawl through a supplied web page, and gather useful information including a wordlist of less-common words 
+ * found, a list of email addresses found, a list of social media accounts found, and more.
  * 
  * Author: Ember Hext
  * GitHub: https://github.com/EmberHext
@@ -28,6 +29,21 @@
  * 
  */
 
+use clap::Parser;
+
+/// Simple program to greet a person
+#[derive(Parser, Debug)]
+#[command(name = "harvest")]
+#[command(author = "Ember Hext <github.com/EmberHext")]
+#[command(version = "1.0")]
+#[command(about = "Crawl through a website for interesting words and more", long_about = "Crawl through a website for interesting words, email addresses, and social media links")]
+struct Cli {
+    #[arg(short, long, value_name = "URL")]
+    url: String,
+    #[arg(short, long, value_name = "FILE")]
+    wlfile: String,
+}
+
 fn main() {
-    println!("Hello, world!");
+    let _args = Cli::parse();
 }
