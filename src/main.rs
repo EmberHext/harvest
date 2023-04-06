@@ -39,14 +39,31 @@ use clap::Parser;
 #[command(about = "Crawl through a website for interesting words and more", long_about = "Crawl through a website for interesting words, email addresses, and social media links")]
 struct Cli {
     /// Link to page to search
-    #[arg(short, long, value_name = "URL")]
     url: String,
     /// File to output wordlist into
-    #[arg(short, long, value_name = "FILE")]
+    #[arg(short, long = "file", value_name = "FILE")]
     wlfile: Option<String>,
     /// Do not output a wordlist
     #[arg(short, long)]
     nowords: bool,
+    /// Find all emails
+    #[arg(short, long)]
+    email: bool,
+    /// File to output emails into
+    #[arg(long, value_name = "FILE")]
+    emfile: Option<String>,
+    /// Find all socials
+    #[arg(short, long)]
+    social: bool,
+    /// File to output socials into
+    #[arg(long, value_name = "FILE")]
+    socfile: Option<String>,
+    /// Depth to crawl, default is 2
+    #[arg(short, long, value_name="x")]
+    depth: Option<u8>,
+    /// Minimum word length, default is 4
+    #[arg(short, long, value_name="x")]
+    min: Option<u8>,
 }
 
 fn main() {
