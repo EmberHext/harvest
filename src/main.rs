@@ -31,7 +31,7 @@
 
 use clap::Parser;
 
-/// Simple program to greet a person
+
 #[derive(Parser, Debug)]
 #[command(name = "harvest")]
 #[command(author = "Ember Hext <github.com/EmberHext")]
@@ -64,6 +64,12 @@ struct Cli {
     /// Minimum word length, default is 4
     #[arg(short, long, value_name="x")]
     min: Option<u8>,
+    /// The number of most common words to filter, default is 400, max is 1000
+    #[arg(short, long, value_name="x")]
+    common: Option<u8>,
+    /// Allow the crawler to follow external links
+    #[arg(short, long)]
+    offsite: bool,
 }
 
 fn main() {
