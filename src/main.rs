@@ -38,10 +38,15 @@ use clap::Parser;
 #[command(version = "1.0")]
 #[command(about = "Crawl through a website for interesting words and more", long_about = "Crawl through a website for interesting words, email addresses, and social media links")]
 struct Cli {
+    /// Link to page to search
     #[arg(short, long, value_name = "URL")]
     url: String,
+    /// File to output wordlist into
     #[arg(short, long, value_name = "FILE")]
-    wlfile: String,
+    wlfile: Option<String>,
+    /// Do not output a wordlist
+    #[arg(short, long)]
+    nowords: bool,
 }
 
 fn main() {
