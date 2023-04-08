@@ -53,6 +53,7 @@ use reqwest::Url;
 use std::collections::HashSet;
 use std::io::Write;
 use unicode_normalization::UnicodeNormalization;
+use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 
 struct Or(Vec<Box<dyn Predicate>>);
 
@@ -72,6 +73,7 @@ fn process_node(
     common_words_limit: usize,
     follow_offsite: bool,
     min_length: usize,
+    user_agent: &Option<String>,
 ) {
     if depth <= max_depth {
         let link = node.attr("href").and_then(|href| base_url.join(href).ok());
@@ -79,7 +81,7 @@ fn process_node(
         if let Some(url) = link {
             // Only follow the link if follow_offsite is true or if the domains match
             if follow_offsite || url.domain() == base_url.domain() {
-                if let Ok(new_word_count) = unique_words_from_url_recursive(&url, depth + 1, max_depth, common_words_limit, visited_urls, follow_offsite, min_length) {
+                if let Ok(new_word_count) = unique_words_from_url_recursive(&url, depth + 1, max_depth, common_words_limit, visited_urls, follow_offsite, min_length, user_agent) {
                     for (word, count) in new_word_count {
                         *word_count.entry(word).or_insert(0) += count;
                     }
@@ -97,12 +99,23 @@ fn unique_words_from_url_recursive(
     visited_urls: &mut HashSet<Url>,
     follow_offsite: bool,
     min_length: usize,
+    user_agent: &Option<String>,
 ) -> Result<HashMap<String, u32>, Box<dyn std::error::Error>> {
     if !visited_urls.insert(url.clone()) {
         // If the URL is already in the visited set, return an empty HashMap
         return Ok(HashMap::new());
     }
-    let resp = reqwest::blocking::get(url.as_str())?;
+    let mut headers = HeaderMap::new();
+    if let Some(ref agent) = user_agent {
+        headers.insert(USER_AGENT, HeaderValue::from_str(agent)?);
+    }
+
+    let client = reqwest::blocking::Client::builder()
+        .default_headers(headers)
+        .build()?;
+
+    let resp = client.get(url.as_str()).send()?;
+
     let document = Document::from_read(resp)?;
     
     let tags = vec![
@@ -150,6 +163,7 @@ fn unique_words_from_url_recursive(
                     common_words_limit,
                     follow_offsite,
                     min_length,
+                    user_agent,
                 );
             }
         }
@@ -164,10 +178,11 @@ fn unique_words_from_url(
     common_words_limit: usize,
     follow_offsite: bool,
     min_length: usize,
+    user_agent: &Option<String>,
 ) -> Result<HashMap<String, u32>, Box<dyn std::error::Error>> {
     let parsed_url = Url::parse(url)?;
     let mut visited_urls = HashSet::new();
-    unique_words_from_url_recursive(&parsed_url, 0, max_depth, common_words_limit, &mut visited_urls, follow_offsite, min_length)
+    unique_words_from_url_recursive(&parsed_url, 0, max_depth, common_words_limit, &mut visited_urls, follow_offsite, min_length, user_agent)
 }
 
 #[derive(Parser, Debug)]
@@ -220,15 +235,16 @@ struct Cli {
 }
 
 fn main() {
-    let url = "https://github.com";
-    let max_depth = 1;
+    let url = "https://fetch.com";
+    let max_depth = 3;
     let common_words_limit = 1000;
     let output_file_path = "output.txt";
     let follow_offsite = false;
-    let min_length = 7;
-    let min_count = 5;
+    let min_length = 5;
+    let min_count = 4;
+    let user_agent: Option<String> = Some("Edg/112.0.1722.34".to_string());
 
-    match unique_words_from_url(url, max_depth, common_words_limit, follow_offsite, min_length) {
+    match unique_words_from_url(url, max_depth, common_words_limit, follow_offsite, min_length, &user_agent) {
         Ok(word_count) => {
             let mut file = File::create(output_file_path).expect("Unable to create file");
 
