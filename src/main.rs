@@ -39,17 +39,19 @@ use std::{
     },
     path::Path,
 };
-use reqwest::blocking::get;
 use select::{
     document::Document,
     predicate::{
+        Attr,
         Name,
         Predicate,
     }
 };
 use regex::Regex;
-use std::sync::Arc;
 use select::node::Node;
+use reqwest::Url;
+use std::collections::HashSet;
+use std::io::Write;
 
 struct Or(Vec<Box<dyn Predicate>>);
 
@@ -59,25 +61,41 @@ impl Predicate for Or {
     }
 }
 
-fn unique_words_from_url(url: &str, common_words_to_ignore: usize) -> Result<HashMap<String, u32>, Box<dyn std::error::Error>> {
-    let common_words_file_path = Path::new("src/resources/commonwords.txt");
-    let file = File::open(&common_words_file_path)?;
-    let reader = BufReader::new(file);
-    let mut common_words = Vec::new();
+fn process_node(
+    node: &Node,
+    base_url: &Url,
+    depth: u32,
+    max_depth: u32,
+    word_count: &mut HashMap<String, u32>,
+    visited_urls: &mut HashSet<Url>,
+    common_words_limit: usize,
+) {
+    if depth <= max_depth {
+        let link = node.attr("href").and_then(|href| base_url.join(href).ok());
 
-    for (i, line) in reader.lines().enumerate() {
-        if i >= common_words_to_ignore {
-            break;
+        if let Some(url) = link {
+            if let Ok(new_word_count) = unique_words_from_url_recursive(&url, depth + 1, max_depth, common_words_limit, visited_urls) {
+                for (word, count) in new_word_count {
+                    *word_count.entry(word).or_insert(0) += count;
+                }
+            }
         }
-        let line = line?;
-        common_words.push(line.to_lowercase());
     }
-
-    let mut word_counts = HashMap::new();
-
-    let resp = reqwest::blocking::get(url)?;
+}
+fn unique_words_from_url_recursive(
+    url: &Url,
+    depth: u32,
+    max_depth: u32,
+    common_words_limit: usize,
+    visited_urls: &mut HashSet<Url>,
+) -> Result<HashMap<String, u32>, Box<dyn std::error::Error>> {
+    if !visited_urls.insert(url.clone()) {
+        // If the URL is already in the visited set, return an empty HashMap
+        return Ok(HashMap::new());
+    }
+    let resp = reqwest::blocking::get(url.as_str())?;
     let document = Document::from_read(resp)?;
-
+    
     let tags = vec![
         Name("h1"), Name("h2"), Name("h3"), Name("h4"), Name("h5"), Name("h6"),
         Name("p"), Name("li"), Name("dt"), Name("dd"), Name("blockquote"), Name("q"), Name("cite"),
@@ -86,23 +104,46 @@ fn unique_words_from_url(url: &str, common_words_to_ignore: usize) -> Result<Has
     ];
 
     let or_predicate = Or(tags.into_iter().map(|tag| Box::new(tag) as Box<dyn Predicate>).collect());
-
     let elements = document.find(or_predicate);
-    let text = elements.map(|n| n.text()).collect::<Vec<_>>().join(" ");
 
-    let word_regex = Regex::new(r"\b[a-zA-Z]+\b").unwrap();
-    let words = word_regex.find_iter(&text)
-        .map(|m| m.as_str().to_lowercase())
-        .filter(|word| !common_words.contains(word));
+    let mut word_count = HashMap::new();
+    let link_predicate = Attr("href", ());
 
-    for word in words {
-        let count = word_counts.entry(word).or_insert(0);
-        *count += 1;
+    let common_words_file = File::open(Path::new("src/resources/commonwords.txt"))?;
+    let common_words_reader = BufReader::new(common_words_file);
+    let common_words: HashSet<_> = common_words_reader.lines().take(common_words_limit).filter_map(Result::ok).collect();
+
+    let re = Regex::new(r"[^a-zA-Z0-9']+").unwrap();
+
+    for node in elements {
+        let text = node.text();
+
+        for word in text.split_whitespace() {
+            let cleaned_word = re.replace_all(word, "").to_lowercase();
+            if !cleaned_word.is_empty() && !common_words.contains(&cleaned_word) {
+                *word_count.entry(cleaned_word).or_insert(0) += 1;
+            }
+        }
+
+        if depth <= max_depth {
+            for link_node in node.find(link_predicate.clone()) {
+                process_node(&link_node, url, depth, max_depth, &mut word_count, visited_urls, common_words_limit);
+            }
+        }
     }
 
-    Ok(word_counts)
+    Ok(word_count)
 }
 
+fn unique_words_from_url(
+    url: &str,
+    max_depth: u32,
+    common_words_limit: usize,
+) -> Result<HashMap<String, u32>, Box<dyn std::error::Error>> {
+    let parsed_url = Url::parse(url)?;
+    let mut visited_urls = HashSet::new();
+    unique_words_from_url_recursive(&parsed_url, 0, max_depth, common_words_limit, &mut visited_urls)
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "harvest")]
@@ -154,17 +195,26 @@ struct Cli {
 }
 
 fn main() {
-    let _args = Cli::parse();
-
     let url = "https://vitejs.dev";
-    let num_common_words = 300;
+    let max_depth = 4;
+    let common_words_limit = 400;
+    let output_file_path = "output.txt";
 
-    match unique_words_from_url(url, num_common_words) {
-        Ok(word_counts) => {
-            for (word, count) in &word_counts {
-                println!("{}: {}", word, count);
+    match unique_words_from_url(url, max_depth, common_words_limit) {
+        Ok(word_count) => {
+            let mut file = File::create(output_file_path).expect("Unable to create file");
+
+            let mut sorted_word_count: Vec<(&String, &u32)> = word_count.iter().collect();
+            sorted_word_count.sort_by(|a, b| b.1.cmp(a.1));
+
+            for (word, count) in sorted_word_count {
+                writeln!(file, "{}: {}", word, count).expect("Unable to write data");
             }
+
+            println!("Results have been written to '{}'", output_file_path);
         }
-        Err(e) => eprintln!("Error: {:?}", e),
+        Err(e) => {
+            println!("Error: {}", e);
+        }
     }
 }
