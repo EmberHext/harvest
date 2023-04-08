@@ -64,6 +64,15 @@ impl Predicate for Or {
     }
 }
 
+struct CrawlConfig {
+    max_depth: u32,
+    common_words_limit: usize,
+    follow_offsite: bool,
+    min_length: usize,
+    user_agent: Option<String>,
+    headers: HeaderMap,
+}
+
 fn headers_from_strings(headers: &[String]) -> Result<HeaderMap, Box<dyn std::error::Error>> {
     let mut header_map = HeaderMap::new();
     for header in headers {
@@ -85,22 +94,17 @@ fn process_node(
     node: &Node,
     base_url: &Url,
     depth: u32,
-    max_depth: u32,
     word_count: &mut HashMap<String, u32>,
     visited_urls: &mut HashSet<Url>,
-    common_words_limit: usize,
-    follow_offsite: bool,
-    min_length: usize,
-    user_agent: &Option<String>,
-    headers: &HeaderMap,
+    config: &CrawlConfig,
 ) {
-    if depth <= max_depth {
+    if depth <= config.max_depth {
         let link = node.attr("href").and_then(|href| base_url.join(href).ok());
 
         if let Some(url) = link {
             // Only follow the link if follow_offsite is true or if the domains match
-            if follow_offsite || url.domain() == base_url.domain() {
-                if let Ok(new_word_count) = unique_words_from_url_recursive(&url, depth + 1, max_depth, common_words_limit, visited_urls, follow_offsite, min_length, user_agent, headers) {
+            if config.follow_offsite || url.domain() == base_url.domain() {
+                if let Ok(new_word_count) = unique_words_from_url_recursive(&url, depth + 1, visited_urls, config) {
                     for (word, count) in new_word_count {
                         *word_count.entry(word).or_insert(0) += count;
                     }
@@ -113,25 +117,20 @@ fn process_node(
 fn unique_words_from_url_recursive(
     url: &Url,
     depth: u32,
-    max_depth: u32,
-    common_words_limit: usize,
     visited_urls: &mut HashSet<Url>,
-    follow_offsite: bool,
-    min_length: usize,
-    user_agent: &Option<String>,
-    headers: &HeaderMap,
+    config: &CrawlConfig,
 ) -> Result<HashMap<String, u32>, Box<dyn std::error::Error>> {
     if !visited_urls.insert(url.clone()) {
         // If the URL is already in the visited set, return an empty HashMap
         return Ok(HashMap::new());
     }
     let mut req_headers = HeaderMap::new();
-    if let Some(ref agent) = user_agent {
+    if let Some(ref agent) = config.user_agent {
         req_headers.insert(USER_AGENT, HeaderValue::from_str(agent)?);
     }
 
     let client = reqwest::blocking::Client::builder()
-        .default_headers(headers.clone())
+        .default_headers(config.headers.clone())
         .build()?;
 
     let resp = client.get(url.as_str()).send()?;
@@ -153,7 +152,7 @@ fn unique_words_from_url_recursive(
 
     let common_words_file = File::open(Path::new("src/resources/commonwords.txt"))?;
     let common_words_reader = BufReader::new(common_words_file);
-    let common_words: HashSet<_> = common_words_reader.lines().take(common_words_limit).filter_map(Result::ok).collect();
+    let common_words: HashSet<_> = common_words_reader.lines().take(config.common_words_limit).filter_map(Result::ok).collect();
 
     let re = Regex::new(r"[^a-zA-Z']+").unwrap();
 
@@ -164,27 +163,22 @@ fn unique_words_from_url_recursive(
         for word in text.split_whitespace() {
             let cleaned_word: String = word.to_lowercase();
             // Check if the cleaned_word contains any special characters and if it meets the minimum length requirement
-            if !re.is_match(&cleaned_word) && !cleaned_word.is_empty() && !common_words.contains(&cleaned_word) && cleaned_word.len() >= min_length {
+            if !re.is_match(&cleaned_word) && !cleaned_word.is_empty() && !common_words.contains(&cleaned_word) && cleaned_word.len() >= config.min_length {
                 *word_count.entry(cleaned_word).or_insert(0) += 1;
             }
         }        
 
 
 
-        if depth <= max_depth {
+        if depth <= config.max_depth {
             for link_node in node.find(link_predicate.clone()) {
                 process_node(
                     &link_node,
                     url,
                     depth,
-                    max_depth,
                     &mut word_count,
                     visited_urls,
-                    common_words_limit,
-                    follow_offsite,
-                    min_length,
-                    user_agent,
-                    &headers,
+                    config,
                 );
             }
         }
@@ -195,16 +189,11 @@ fn unique_words_from_url_recursive(
 
 fn unique_words_from_url(
     url: &str,
-    max_depth: u32,
-    common_words_limit: usize,
-    follow_offsite: bool,
-    min_length: usize,
-    user_agent: &Option<String>,
-    headers: &HeaderMap,
+    config: &CrawlConfig,
 ) -> Result<HashMap<String, u32>, Box<dyn std::error::Error>> {
     let parsed_url = Url::parse(url)?;
     let mut visited_urls = HashSet::new();
-    unique_words_from_url_recursive(&parsed_url, 0, max_depth, common_words_limit, &mut visited_urls, follow_offsite, min_length, user_agent, headers)
+    unique_words_from_url_recursive(&parsed_url, 0, &mut visited_urls, config)
 }
 
 #[derive(Parser, Debug)]
@@ -270,7 +259,16 @@ fn main() {
         std::process::exit(1);
     });
 
-    match unique_words_from_url(url, max_depth, common_words_limit, follow_offsite, min_length, &user_agent, &headers) {
+    let config = CrawlConfig {
+        max_depth,
+        common_words_limit,
+        follow_offsite,
+        min_length,
+        user_agent,
+        headers,
+    };
+
+    match unique_words_from_url(url, &config) {
         Ok(word_count) => {
             let mut file = File::create(output_file_path).expect("Unable to create file");
 
