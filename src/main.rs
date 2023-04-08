@@ -30,6 +30,78 @@
  */
 
 use clap::Parser;
+use std::{
+    collections::HashMap,
+    fs::File,
+    io::{
+        BufRead,
+        BufReader,
+    },
+    path::Path,
+};
+use reqwest::blocking::get;
+use select::{
+    document::Document,
+    predicate::{
+        Name,
+        Predicate,
+    }
+};
+use regex::Regex;
+use std::sync::Arc;
+use select::node::Node;
+
+struct Or(Vec<Box<dyn Predicate>>);
+
+impl Predicate for Or {
+    fn matches(&self, node: &Node) -> bool {
+        self.0.iter().any(|predicate| predicate.matches(node))
+    }
+}
+
+fn unique_words_from_url(url: &str, common_words_to_ignore: usize) -> Result<HashMap<String, u32>, Box<dyn std::error::Error>> {
+    let common_words_file_path = Path::new("src/resources/commonwords.txt");
+    let file = File::open(&common_words_file_path)?;
+    let reader = BufReader::new(file);
+    let mut common_words = Vec::new();
+
+    for (i, line) in reader.lines().enumerate() {
+        if i >= common_words_to_ignore {
+            break;
+        }
+        let line = line?;
+        common_words.push(line.to_lowercase());
+    }
+
+    let mut word_counts = HashMap::new();
+
+    let resp = reqwest::blocking::get(url)?;
+    let document = Document::from_read(resp)?;
+
+    let tags = vec![
+        Name("h1"), Name("h2"), Name("h3"), Name("h4"), Name("h5"), Name("h6"),
+        Name("p"), Name("li"), Name("dt"), Name("dd"), Name("blockquote"), Name("q"), Name("cite"),
+        Name("caption"), Name("th"), Name("td"), Name("pre"), Name("code"), Name("strong"), Name("em"),
+        Name("mark"), Name("small"), Name("del"), Name("ins"), Name("sub"), Name("sup"), Name("a"),
+    ];
+
+    let or_predicate = Or(tags.into_iter().map(|tag| Box::new(tag) as Box<dyn Predicate>).collect());
+
+    let elements = document.find(or_predicate);
+    let text = elements.map(|n| n.text()).collect::<Vec<_>>().join(" ");
+
+    let word_regex = Regex::new(r"\b[a-zA-Z]+\b").unwrap();
+    let words = word_regex.find_iter(&text)
+        .map(|m| m.as_str().to_lowercase())
+        .filter(|word| !common_words.contains(word));
+
+    for word in words {
+        let count = word_counts.entry(word).or_insert(0);
+        *count += 1;
+    }
+
+    Ok(word_counts)
+}
 
 
 #[derive(Parser, Debug)]
@@ -77,10 +149,22 @@ struct Cli {
     #[arg(short, long)]
     lower: bool,
     /// Parses words that contains diacritics, but removes the diacritics
-    #[arg(short, long)]
+    #[arg(short='r', long)]
     diacrit_remove: bool,
 }
 
 fn main() {
     let _args = Cli::parse();
+
+    let url = "https://vitejs.dev";
+    let num_common_words = 300;
+
+    match unique_words_from_url(url, num_common_words) {
+        Ok(word_counts) => {
+            for (word, count) in &word_counts {
+                println!("{}: {}", word, count);
+            }
+        }
+        Err(e) => eprintln!("Error: {:?}", e),
+    }
 }
