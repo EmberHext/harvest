@@ -52,6 +52,7 @@ use select::node::Node;
 use reqwest::Url;
 use std::collections::HashSet;
 use std::io::Write;
+use unicode_normalization::UnicodeNormalization;
 
 struct Or(Vec<Box<dyn Predicate>>);
 
@@ -113,21 +114,33 @@ fn unique_words_from_url_recursive(
     let common_words_reader = BufReader::new(common_words_file);
     let common_words: HashSet<_> = common_words_reader.lines().take(common_words_limit).filter_map(Result::ok).collect();
 
-    let re = Regex::new(r"[^a-zA-Z0-9']+").unwrap();
+    let re = Regex::new(r"[^a-zA-Z']+").unwrap();
 
     for node in elements {
         let text = node.text();
+        let text = text.nfc().collect::<String>();
 
         for word in text.split_whitespace() {
-            let cleaned_word = re.replace_all(word, "").to_lowercase();
+            let cleaned_word: String = re.replace_all(word, "").nfc().collect();
+            let cleaned_word = cleaned_word.to_lowercase();
             if !cleaned_word.is_empty() && !common_words.contains(&cleaned_word) {
                 *word_count.entry(cleaned_word).or_insert(0) += 1;
             }
         }
 
+
+
         if depth <= max_depth {
             for link_node in node.find(link_predicate.clone()) {
-                process_node(&link_node, url, depth, max_depth, &mut word_count, visited_urls, common_words_limit);
+                process_node(
+                    &link_node,
+                    url,
+                    depth,
+                    max_depth,
+                    &mut word_count,
+                    visited_urls,
+                    common_words_limit,
+                );
             }
         }
     }
@@ -195,9 +208,9 @@ struct Cli {
 }
 
 fn main() {
-    let url = "https://vitejs.dev";
-    let max_depth = 4;
-    let common_words_limit = 400;
+    let url = "https://travisaw.com";
+    let max_depth = 2;
+    let common_words_limit = 1000;
     let output_file_path = "output.txt";
 
     match unique_words_from_url(url, max_depth, common_words_limit) {

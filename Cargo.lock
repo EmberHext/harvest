@@ -358,6 +358,7 @@ dependencies = [
  "reqwest",
  "select",
  "tokio",
+ "unicode-normalization",
 ]
 
 [[package]]
