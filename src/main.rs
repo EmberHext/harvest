@@ -49,11 +49,12 @@ use select::{
 };
 use regex::Regex;
 use select::node::Node;
-use reqwest::Url;
+use reqwest::{Url};
 use std::collections::HashSet;
 use std::io::Write;
 use unicode_normalization::UnicodeNormalization;
-use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, USER_AGENT};
+use std::str::FromStr;
 
 struct Or(Vec<Box<dyn Predicate>>);
 
@@ -61,6 +62,23 @@ impl Predicate for Or {
     fn matches(&self, node: &Node) -> bool {
         self.0.iter().any(|predicate| predicate.matches(node))
     }
+}
+
+fn headers_from_strings(headers: &[String]) -> Result<HeaderMap, Box<dyn std::error::Error>> {
+    let mut header_map = HeaderMap::new();
+    for header in headers {
+        let parts: Vec<&str> = header.splitn(2, ':').collect();
+        if parts.len() == 2 {
+            let name = parts[0].trim();
+            let value = parts[1].trim();
+            let header_name = HeaderName::from_str(name)?;
+            let header_value = HeaderValue::from_str(value)?;
+            header_map.insert(header_name, header_value);
+        } else {
+            return Err(format!("Invalid header format: {}", header).into());
+        }
+    }
+    Ok(header_map)
 }
 
 fn process_node(
@@ -74,6 +92,7 @@ fn process_node(
     follow_offsite: bool,
     min_length: usize,
     user_agent: &Option<String>,
+    headers: &HeaderMap,
 ) {
     if depth <= max_depth {
         let link = node.attr("href").and_then(|href| base_url.join(href).ok());
@@ -81,7 +100,7 @@ fn process_node(
         if let Some(url) = link {
             // Only follow the link if follow_offsite is true or if the domains match
             if follow_offsite || url.domain() == base_url.domain() {
-                if let Ok(new_word_count) = unique_words_from_url_recursive(&url, depth + 1, max_depth, common_words_limit, visited_urls, follow_offsite, min_length, user_agent) {
+                if let Ok(new_word_count) = unique_words_from_url_recursive(&url, depth + 1, max_depth, common_words_limit, visited_urls, follow_offsite, min_length, user_agent, headers) {
                     for (word, count) in new_word_count {
                         *word_count.entry(word).or_insert(0) += count;
                     }
@@ -100,18 +119,19 @@ fn unique_words_from_url_recursive(
     follow_offsite: bool,
     min_length: usize,
     user_agent: &Option<String>,
+    headers: &HeaderMap,
 ) -> Result<HashMap<String, u32>, Box<dyn std::error::Error>> {
     if !visited_urls.insert(url.clone()) {
         // If the URL is already in the visited set, return an empty HashMap
         return Ok(HashMap::new());
     }
-    let mut headers = HeaderMap::new();
+    let mut req_headers = HeaderMap::new();
     if let Some(ref agent) = user_agent {
-        headers.insert(USER_AGENT, HeaderValue::from_str(agent)?);
+        req_headers.insert(USER_AGENT, HeaderValue::from_str(agent)?);
     }
 
     let client = reqwest::blocking::Client::builder()
-        .default_headers(headers)
+        .default_headers(headers.clone())
         .build()?;
 
     let resp = client.get(url.as_str()).send()?;
@@ -164,6 +184,7 @@ fn unique_words_from_url_recursive(
                     follow_offsite,
                     min_length,
                     user_agent,
+                    &headers,
                 );
             }
         }
@@ -179,10 +200,11 @@ fn unique_words_from_url(
     follow_offsite: bool,
     min_length: usize,
     user_agent: &Option<String>,
+    headers: &HeaderMap,
 ) -> Result<HashMap<String, u32>, Box<dyn std::error::Error>> {
     let parsed_url = Url::parse(url)?;
     let mut visited_urls = HashSet::new();
-    unique_words_from_url_recursive(&parsed_url, 0, max_depth, common_words_limit, &mut visited_urls, follow_offsite, min_length, user_agent)
+    unique_words_from_url_recursive(&parsed_url, 0, max_depth, common_words_limit, &mut visited_urls, follow_offsite, min_length, user_agent, headers)
 }
 
 #[derive(Parser, Debug)]
@@ -243,8 +265,12 @@ fn main() {
     let min_length = 5;
     let min_count = 4;
     let user_agent: Option<String> = Some("Edg/112.0.1722.34".to_string());
+    let headers = headers_from_strings(&["Accept-Charset: iso-8859-5, Unicode-1-1; q = 0,8".to_string()]).unwrap_or_else(|err| {
+        eprintln!("Error: {}", err);
+        std::process::exit(1);
+    });
 
-    match unique_words_from_url(url, max_depth, common_words_limit, follow_offsite, min_length, &user_agent) {
+    match unique_words_from_url(url, max_depth, common_words_limit, follow_offsite, min_length, &user_agent, &headers) {
         Ok(word_count) => {
             let mut file = File::create(output_file_path).expect("Unable to create file");
 
