@@ -70,25 +70,31 @@ fn process_node(
     word_count: &mut HashMap<String, u32>,
     visited_urls: &mut HashSet<Url>,
     common_words_limit: usize,
+    follow_offsite: bool,
 ) {
     if depth <= max_depth {
         let link = node.attr("href").and_then(|href| base_url.join(href).ok());
 
         if let Some(url) = link {
-            if let Ok(new_word_count) = unique_words_from_url_recursive(&url, depth + 1, max_depth, common_words_limit, visited_urls) {
-                for (word, count) in new_word_count {
-                    *word_count.entry(word).or_insert(0) += count;
+            // Only follow the link if follow_offsite is true or if the domains match
+            if follow_offsite || url.domain() == base_url.domain() {
+                if let Ok(new_word_count) = unique_words_from_url_recursive(&url, depth + 1, max_depth, common_words_limit, visited_urls, follow_offsite) {
+                    for (word, count) in new_word_count {
+                        *word_count.entry(word).or_insert(0) += count;
+                    }
                 }
             }
         }
     }
 }
+
 fn unique_words_from_url_recursive(
     url: &Url,
     depth: u32,
     max_depth: u32,
     common_words_limit: usize,
     visited_urls: &mut HashSet<Url>,
+    follow_offsite: bool,
 ) -> Result<HashMap<String, u32>, Box<dyn std::error::Error>> {
     if !visited_urls.insert(url.clone()) {
         // If the URL is already in the visited set, return an empty HashMap
@@ -121,9 +127,9 @@ fn unique_words_from_url_recursive(
         let text = text.nfc().collect::<String>();
 
         for word in text.split_whitespace() {
-            let cleaned_word: String = re.replace_all(word, "").nfc().collect();
-            let cleaned_word = cleaned_word.to_lowercase();
-            if !cleaned_word.is_empty() && !common_words.contains(&cleaned_word) {
+            let cleaned_word: String = word.to_lowercase();
+            // Check if the cleaned_word contains any special characters
+            if !re.is_match(&cleaned_word) && !cleaned_word.is_empty() && !common_words.contains(&cleaned_word) {
                 *word_count.entry(cleaned_word).or_insert(0) += 1;
             }
         }
@@ -140,6 +146,7 @@ fn unique_words_from_url_recursive(
                     &mut word_count,
                     visited_urls,
                     common_words_limit,
+                    follow_offsite,
                 );
             }
         }
@@ -152,10 +159,11 @@ fn unique_words_from_url(
     url: &str,
     max_depth: u32,
     common_words_limit: usize,
+    follow_offsite: bool,
 ) -> Result<HashMap<String, u32>, Box<dyn std::error::Error>> {
     let parsed_url = Url::parse(url)?;
     let mut visited_urls = HashSet::new();
-    unique_words_from_url_recursive(&parsed_url, 0, max_depth, common_words_limit, &mut visited_urls)
+    unique_words_from_url_recursive(&parsed_url, 0, max_depth, common_words_limit, &mut visited_urls, follow_offsite)
 }
 
 #[derive(Parser, Debug)]
@@ -208,12 +216,13 @@ struct Cli {
 }
 
 fn main() {
-    let url = "https://travisaw.com";
-    let max_depth = 2;
+    let url = "https://github.com";
+    let max_depth = 5;
     let common_words_limit = 1000;
     let output_file_path = "output.txt";
+    let follow_offsite = false;
 
-    match unique_words_from_url(url, max_depth, common_words_limit) {
+    match unique_words_from_url(url, max_depth, common_words_limit, follow_offsite) {
         Ok(word_count) => {
             let mut file = File::create(output_file_path).expect("Unable to create file");
 
