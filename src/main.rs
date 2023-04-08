@@ -29,32 +29,44 @@
  * 
  */
 
-use clap::Parser;
 use std::{
-    collections::HashMap,
+    collections::{
+        HashMap,
+        HashSet,
+    },
     fs::File,
     io::{
+        Write,
         BufRead,
         BufReader,
     },
     path::Path,
+    str::FromStr,
 };
+
 use select::{
     document::Document,
     predicate::{
         Attr,
         Name,
         Predicate,
-    }
+    },
+    node::Node,
 };
+
+use reqwest::{
+    header::{
+        HeaderMap,
+        HeaderName,
+        HeaderValue,
+        USER_AGENT,
+    },
+    Url,
+};
+
+use clap::Parser;
 use regex::Regex;
-use select::node::Node;
-use reqwest::{Url};
-use std::collections::HashSet;
-use std::io::Write;
 use unicode_normalization::UnicodeNormalization;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, USER_AGENT};
-use std::str::FromStr;
 
 struct Or(Vec<Box<dyn Predicate>>);
 
