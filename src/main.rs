@@ -70,6 +70,15 @@ struct Cli {
     /// Allow the crawler to follow external links
     #[arg(short, long)]
     offsite: bool,
+    /// User agent to send in http header
+    #[arg(short, long, value_name = "AGENT")]
+    agent: Option<String>,
+    /// Coverty all words to lowercase
+    #[arg(short, long)]
+    lower: bool,
+    /// Parses words that contains diacritics, but removes the diacritics
+    #[arg(short, long)]
+    diacrit_remove: bool,
 }
 
 fn main() {
