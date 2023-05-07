@@ -1,66 +1,50 @@
 /*
- * HARVEST (High-speed Asynchronous Rust Vocabulary Extraction and Search Tool) is an OSINT tool to recursively 
- * crawl through a supplied web page, and gather useful information including a wordlist of less-common words 
+ * HARVEST (High-speed Asynchronous Rust Vocabulary Extraction and Search Tool) is an OSINT tool to recursively
+ * crawl through a supplied web page, and gather useful information including a wordlist of less-common words
  * found, a list of email addresses found, a list of social media accounts found, and more.
- * 
+ *
  * Author: Ember Hext
  * GitHub: https://github.com/EmberHext
  * Twitter: @EmberHext
- * 
+ *
  * It is released under the MIT License:
- * 
+ *
  * Copyright 2023 Ember Hext
  *
- * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated 
- * documentation files (the “Software”), to deal in the Software without restriction, including without limitation 
- * the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and 
+ * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+ * documentation files (the “Software”), to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and
  * to permit persons to whom the Software is furnished to do so, subject to the following conditions:
  *
  * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
- * 
- * THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE 
- * WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR 
- * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR 
+ *
+ * THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+ * WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+ * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
  * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  *
- * 
- * Note: This is intended to be used for your own servers or in contexts like pentesting and CTFs where you are authorised 
+ *
+ * Note: This is intended to be used for your own servers or in contexts like pentesting and CTFs where you are authorised
  * to be engaging with the server in this manner.
- * 
+ *
  */
 
 use std::{
-    collections::{
-        HashMap,
-        HashSet,
-    },
+    collections::{HashMap, HashSet},
     fs::File,
-    io::{
-        Write,
-        BufRead,
-        BufReader,
-    },
+    io::{BufRead, BufReader, Write},
     path::Path,
     str::FromStr,
 };
 
 use select::{
     document::Document,
-    predicate::{
-        Attr,
-        Name,
-        Predicate,
-    },
     node::Node,
+    predicate::{Attr, Name, Predicate},
 };
 
 use reqwest::{
-    header::{
-        HeaderMap,
-        HeaderName,
-        HeaderValue,
-        USER_AGENT,
-    },
+    header::{HeaderMap, HeaderName, HeaderValue, USER_AGENT},
     Url,
 };
 
@@ -116,7 +100,9 @@ fn process_node(
         if let Some(url) = link {
             // Only follow the link if follow_offsite is true or if the domains match
             if config.follow_offsite || url.domain() == base_url.domain() {
-                if let Ok(new_word_count) = unique_words_from_url_recursive(&url, depth + 1, visited_urls, config) {
+                if let Ok(new_word_count) =
+                    unique_words_from_url_recursive(&url, depth + 1, visited_urls, config)
+                {
                     for (word, count) in new_word_count {
                         *word_count.entry(word).or_insert(0) += count;
                     }
@@ -148,15 +134,41 @@ fn unique_words_from_url_recursive(
     let resp = client.get(url.as_str()).send()?;
 
     let document = Document::from_read(resp)?;
-    
+
     let tags = vec![
-        Name("h1"), Name("h2"), Name("h3"), Name("h4"), Name("h5"), Name("h6"),
-        Name("p"), Name("li"), Name("dt"), Name("dd"), Name("blockquote"), Name("q"), Name("cite"),
-        Name("caption"), Name("th"), Name("td"), Name("pre"), Name("code"), Name("strong"), Name("em"),
-        Name("mark"), Name("small"), Name("del"), Name("ins"), Name("sub"), Name("sup"), Name("a"),
+        Name("h1"),
+        Name("h2"),
+        Name("h3"),
+        Name("h4"),
+        Name("h5"),
+        Name("h6"),
+        Name("p"),
+        Name("li"),
+        Name("dt"),
+        Name("dd"),
+        Name("blockquote"),
+        Name("q"),
+        Name("cite"),
+        Name("caption"),
+        Name("th"),
+        Name("td"),
+        Name("pre"),
+        Name("code"),
+        Name("strong"),
+        Name("em"),
+        Name("mark"),
+        Name("small"),
+        Name("del"),
+        Name("ins"),
+        Name("sub"),
+        Name("sup"),
+        Name("a"),
     ];
 
-    let or_predicate = Or(tags.into_iter().map(|tag| Box::new(tag) as Box<dyn Predicate>).collect());
+    let or_predicate = Or(tags
+        .into_iter()
+        .map(|tag| Box::new(tag) as Box<dyn Predicate>)
+        .collect());
     let elements = document.find(or_predicate);
 
     let mut word_count = HashMap::new();
@@ -164,7 +176,11 @@ fn unique_words_from_url_recursive(
 
     let common_words_file = File::open(Path::new("src/resources/commonwords.txt"))?;
     let common_words_reader = BufReader::new(common_words_file);
-    let common_words: HashSet<_> = common_words_reader.lines().take(config.common_words_limit).filter_map(Result::ok).collect();
+    let common_words: HashSet<_> = common_words_reader
+        .lines()
+        .take(config.common_words_limit)
+        .filter_map(Result::ok)
+        .collect();
 
     let re = Regex::new(r"[^a-zA-Z']+").unwrap();
 
@@ -175,12 +191,14 @@ fn unique_words_from_url_recursive(
         for word in text.split_whitespace() {
             let cleaned_word: String = word.to_lowercase();
             // Check if the cleaned_word contains any special characters and if it meets the minimum length requirement
-            if !re.is_match(&cleaned_word) && !cleaned_word.is_empty() && !common_words.contains(&cleaned_word) && cleaned_word.len() >= config.min_length {
+            if !re.is_match(&cleaned_word)
+                && !cleaned_word.is_empty()
+                && !common_words.contains(&cleaned_word)
+                && cleaned_word.len() >= config.min_length
+            {
                 *word_count.entry(cleaned_word).or_insert(0) += 1;
             }
-        }        
-
-
+        }
 
         if depth <= config.max_depth {
             for link_node in node.find(link_predicate.clone()) {
@@ -212,7 +230,10 @@ fn unique_words_from_url(
 #[command(name = "harvest")]
 #[command(author = "Ember Hext <github.com/EmberHext")]
 #[command(version = "1.0")]
-#[command(about = "Crawl through a website for interesting words and more", long_about = "Crawl through a website for interesting words, email addresses, and social media links")]
+#[command(
+    about = "Crawl through a website for interesting words and more",
+    long_about = "Crawl through a website for interesting words, email addresses, and social media links"
+)]
 struct Cli {
     /// Link to page to search
     url: String,
@@ -235,13 +256,13 @@ struct Cli {
     #[arg(long, value_name = "FILE")]
     socfile: Option<String>,
     /// Depth to crawl, default is 2
-    #[arg(short, long, value_name="x")]
+    #[arg(short, long, value_name = "x")]
     depth: Option<u8>,
     /// Minimum word length, default is 4
-    #[arg(short, long, value_name="x")]
+    #[arg(short, long, value_name = "x")]
     min: Option<u8>,
     /// The number of most common words to filter, default is 400, max is 1000
-    #[arg(short, long, value_name="x")]
+    #[arg(short, long, value_name = "x")]
     common: Option<u8>,
     /// Allow the crawler to follow external links
     #[arg(short, long)]
@@ -253,12 +274,12 @@ struct Cli {
     #[arg(short, long)]
     lower: bool,
     /// Parses words that contains diacritics, but removes the diacritics
-    #[arg(short='r', long)]
+    #[arg(short = 'r', long)]
     diacrit_remove: bool,
 }
 
 fn main() {
-    let url = "https://fetch.com";
+    let url = "https://nytimes.com";
     let max_depth = 3;
     let common_words_limit = 1000;
     let output_file_path = "output.txt";
@@ -266,10 +287,12 @@ fn main() {
     let min_length = 5;
     let min_count = 4;
     let user_agent: Option<String> = Some("Edg/112.0.1722.34".to_string());
-    let headers = headers_from_strings(&["Accept-Charset: iso-8859-5, Unicode-1-1; q = 0,8".to_string()]).unwrap_or_else(|err| {
-        eprintln!("Error: {}", err);
-        std::process::exit(1);
-    });
+    let headers =
+        headers_from_strings(&["Accept-Charset: iso-8859-5, Unicode-1-1; q = 0,8".to_string()])
+            .unwrap_or_else(|err| {
+                eprintln!("Error: {}", err);
+                std::process::exit(1);
+            });
 
     let config = CrawlConfig {
         max_depth,
@@ -291,7 +314,6 @@ fn main() {
                 .into_iter()
                 .filter(|(_, &count)| count >= min_count)
                 .collect();
-
 
             for (word, count) in sorted_word_count {
                 writeln!(file, "{}: {}", word, count).expect("Unable to write data");
